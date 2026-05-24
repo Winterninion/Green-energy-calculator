@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>绿电直连风光储消纳测算平台</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+</head>
+<body class="bg-gray-50 min-h-screen p-6">
+  <div class="max-w-7xl mx-auto">
+    <h1 class="text-3xl font-bold text-gray-900">☀️ 绿电直连风光储消纳测算平台</h1>
+    <p class="mt-2 text-gray-500">兼容任意多个负荷曲线、固定负荷叠加、15 分钟负荷曲线、1~8760 小时序号、样机/场站风电出力曲线，并输出扩展版申报指标。</p>
+
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-6 mt-8">
+      <aside class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 lg:col-span-1">
+        <h2 class="text-xl font-bold mb-5">测算参数配置</h2>
+        <form id="calcForm" class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700">光伏装机总容量 MW/MWp</label>
+            <input type="number" step="any" id="capacity" value="10.6" class="mt-1 w-full rounded-md border border-gray-300 p-2" />
+            <p class="text-xs text-gray-400 mt-1">这里填光伏容量，不是变/接网容量。海纳项目建议填 10.6。</p>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-sm font-medium text-gray-700">风电规模 MW</label>
+              <input type="number" step="any" id="windCapacity" value="0" class="mt-1 w-full rounded-md border border-gray-300 p-2" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700">风电等效利用小时 h</label>
+              <input type="number" step="any" id="windTargetHours" value="0" class="mt-1 w-full rounded-md border border-gray-300 p-2" />
+              <p class="text-xs text-gray-400 mt-1">可选。填 0 则按上传曲线原值；填 2000 则把风电年发电量校准为“规模×2000h”。</p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700">接网/配变容量 MVA</label>
+              <input type="number" step="any" id="gridCapacity" value="15" class="mt-1 w-full rounded-md border border-gray-300 p-2" />
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700">额外固定负荷 MW</label>
+            <input type="number" step="any" id="fixedLoad" value="0" class="mt-1 w-full rounded-md border border-gray-300 p-2" />
+            <p class="text-xs text-gray-400 mt-1">用于新增连续生产负荷/保底负荷等场景；系统会在合并后的负荷曲线每个小时额外加上该固定功率。</p>
+          </div>
+
+          <hr />
+          <label class="inline-flex items-center gap-2 text-sm font-medium text-gray-700">
+            <input type="checkbox" id="enableStorage" checked class="rounded" /> 启用储能计算
+          </label>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-sm text-gray-600">储能功率 MW</label>
+              <input type="number" step="any" id="storagePower" value="5" class="mt-1 w-full rounded-md border border-gray-300 p-2" />
+            </div>
+            <div>
+              <label class="block text-sm text-gray-600">储能容量 MWh</label>
+              <input type="number" step="any" id="storageEnergy" value="10.264" class="mt-1 w-full rounded-md border border-gray-300 p-2" />
+            </div>
+            <div>
+              <label class="block text-sm text-gray-600">充电效率 %</label>
+              <input type="number" step="any" id="chargeEff" value="95" class="mt-1 w-full rounded-md border border-gray-300 p-2" />
+            </div>
+            <div>
+              <label class="block text-sm text-gray-600">放电效率 %</label>
+              <input type="number" step="any" id="dischargeEff" value="95" class="mt-1 w-full rounded-md border border-gray-300 p-2" />
+            </div>
+            <div>
+              <label class="block text-sm text-gray-600">SOC下限 %</label>
+              <input type="number" step="any" id="minSoc" value="5" class="mt-1 w-full rounded-md border border-gray-300 p-2" />
+            </div>
+            <div>
+              <label class="block text-sm text-gray-600">SOC上限 %</label>
+              <input type="number" step="any" id="maxSoc" value="100" class="mt-1 w-full rounded-md border border-gray-300 p-2" />
+            </div>
+            <div class="col-span-2">
+              <label class="block text-sm text-gray-600">初始SOC %</label>
+              <input type="number" step="any" id="initialSoc" value="5" class="mt-1 w-full rounded-md border border-gray-300 p-2" />
+            </div>
+          </div>
+
+          <hr />
+          <div>
+            <label class="block text-sm font-medium text-gray-700">1. 用电负荷表 Excel/CSV（可多选）</label>
+            <input type="file" id="loadFile" multiple accept=".csv,.xlsx,.xls,.xlsm" class="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
+            <p class="text-xs text-gray-400 mt-1">支持同时上传主变、副变、关口表等多个负荷文件；同一小时自动累加，不同时段自动衔接。</p>
+            <div id="loadFileList" class="text-xs text-gray-500 mt-1"></div>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700">2. 光伏预测/出力表 Excel/CSV</label>
+            <input type="file" id="pvFile" accept=".csv,.xlsx,.xls,.xlsm" class="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700">3. 风电出力表 Excel/CSV（可选）</label>
+            <input type="file" id="windFile" accept=".csv,.xlsx,.xls,.xlsm" class="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-cyan-50 file:text-cyan-700 hover:file:bg-cyan-100" />
+            <p class="text-xs text-gray-400 mt-1">支持“5MW机型8760h出力曲线”这类样机出力表，系统会自动按风电规模放大。</p>
+          </div>
+
+          <button type="submit" class="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-md hover:bg-blue-700 transition">开始测算</button>
+        </form>
+        <div id="loading" class="hidden mt-4 text-center text-blue-600 font-medium">服务器计算中...</div>
+      </aside>
+
+      <main class="lg:col-span-3 space-y-6">
+        <div class="grid grid-cols-2 md:grid-cols-6 gap-4">
+          <div class="bg-white p-5 rounded-xl shadow-sm border text-center"><div class="text-sm text-gray-500">企业年用电量</div><div class="text-2xl font-bold text-purple-500 mt-2"><span id="res-load">--</span> <span class="text-sm text-gray-400">万kWh</span></div></div>
+          <div class="bg-white p-5 rounded-xl shadow-sm border text-center"><div class="text-sm text-gray-500">新能源年发电量</div><div class="text-2xl font-bold text-orange-500 mt-2"><span id="res-gen">--</span> <span class="text-sm text-gray-400">万kWh</span></div></div>
+          <div class="bg-white p-5 rounded-xl shadow-sm border text-center"><div class="text-sm text-gray-500">年自发自用电量</div><div class="text-2xl font-bold text-green-600 mt-2"><span id="res-consumed">--</span> <span class="text-sm text-gray-400">万kWh</span></div></div>
+          <div class="bg-white p-5 rounded-xl shadow-sm border text-center"><div class="text-sm text-gray-500">固定负荷叠加</div><div class="text-2xl font-bold text-indigo-600 mt-2"><span id="res-fixed-load">--</span> <span class="text-sm text-gray-400">万kWh</span></div></div>
+          <div class="bg-white p-5 rounded-xl shadow-sm border text-center"><div class="text-sm text-gray-500">最大同时负荷曲线数</div><div class="text-3xl font-bold text-sky-600 mt-2"><span id="res-load-count">--</span></div></div>
+          <div class="bg-white p-5 rounded-xl shadow-sm border text-center"><div class="text-sm text-gray-500">自发自用/发电量</div><div class="text-3xl font-bold text-blue-600 mt-2"><span id="res-rate">--</span></div></div>
+        </div>
+
+        <div id="diagnosticsBox" class="hidden bg-yellow-50 border border-yellow-200 text-yellow-900 rounded-xl p-4 text-sm"></div>
+
+        <section class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <h2 class="text-xl font-bold mb-4">申报标准核心指标</h2>
+          <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-100">
+              <thead class="bg-gray-50"><tr><th class="px-4 py-3 text-left text-sm font-semibold text-gray-600">指标名称</th><th class="px-4 py-3 text-right text-sm font-semibold text-gray-600">计算结果</th></tr></thead>
+              <tbody id="indicatorTable" class="divide-y divide-gray-100 text-sm"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <section class="bg-white p-6 rounded-xl shadow-sm border"><h2 class="text-lg font-bold mb-4">月度电量对比</h2><div id="chart-energy" style="height: 360px"></div></section>
+          <section class="bg-white p-6 rounded-xl shadow-sm border"><h2 class="text-lg font-bold mb-4">月度比例趋势</h2><div id="chart-rate" style="height: 360px"></div></section>
+          <section class="bg-white p-6 rounded-xl shadow-sm border"><h2 class="text-lg font-bold mb-4">月度风光发电构成</h2><div id="chart-source" style="height: 360px"></div></section>
+          <section class="bg-white p-6 rounded-xl shadow-sm border"><h2 class="text-lg font-bold mb-4">月度参与负荷曲线数</h2><div id="chart-load-count" style="height: 360px"></div></section>
+          <section class="bg-white p-6 rounded-xl shadow-sm border"><h2 class="text-lg font-bold mb-4">SOC 前 240 小时预览</h2><div id="chart-soc" style="height: 360px"></div></section>
+        </div>
+      </main>
+    </div>
+  </div>
+
+<script>
+  const chartEnergy = echarts.init(document.getElementById('chart-energy'));
+  const chartRate = echarts.init(document.getElementById('chart-rate'));
+  const chartSource = echarts.init(document.getElementById('chart-source'));
+  const chartLoadCount = echarts.init(document.getElementById('chart-load-count'));
+  const chartSoc = echarts.init(document.getElementById('chart-soc'));
+  window.addEventListener('resize', () => { chartEnergy.resize(); chartRate.resize(); chartSource.resize(); chartLoadCount.resize(); chartSoc.resize(); });
+
+  const wan = (kwh) => (Number(kwh || 0) / 10000).toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+  document.getElementById('loadFile').addEventListener('change', () => {
+    const files = Array.from(document.getElementById('loadFile').files || []);
+    const box = document.getElementById('loadFileList');
+    box.innerHTML = files.length ? `已选择 ${files.length} 个负荷文件：` + files.map(f => `<div class="truncate">• ${f.name}</div>`).join('') : '';
+  });
+
+  document.getElementById('calcForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const loadFiles = Array.from(document.getElementById('loadFile').files || []);
+    const pvFile = document.getElementById('pvFile').files[0];
+    const windFile = document.getElementById('windFile').files[0];
+    if (!loadFiles.length) { alert('请至少选择 1 个用电负荷表！'); return; }
+    if (!pvFile && !windFile) { alert('请至少选择光伏表或风电表中的一种！'); return; }
+
+    const formData = new FormData();
+    formData.append('capacity_mw', document.getElementById('capacity').value || 0);
+    formData.append('wind_capacity_mw', document.getElementById('windCapacity').value || 0);
+    formData.append('wind_target_hours', document.getElementById('windTargetHours').value || 0);
+    formData.append('grid_capacity_mva', document.getElementById('gridCapacity').value || 0);
+    formData.append('fixed_load_mw', document.getElementById('fixedLoad').value || 0);
+    formData.append('enable_storage', document.getElementById('enableStorage').checked);
+    formData.append('storage_power_mw', document.getElementById('storagePower').value || 0);
+    formData.append('storage_energy_mwh', document.getElementById('storageEnergy').value || 0);
+    formData.append('charge_efficiency', document.getElementById('chargeEff').value || 95);
+    formData.append('discharge_efficiency', document.getElementById('dischargeEff').value || 95);
+    formData.append('min_soc_percent', document.getElementById('minSoc').value || 0);
+    formData.append('max_soc_percent', document.getElementById('maxSoc').value || 100);
+    formData.append('initial_soc_percent', document.getElementById('initialSoc').value || 0);
+    loadFiles.forEach(file => formData.append('load_files', file));
+    if (pvFile) formData.append('pv_file', pvFile);
+    if (windFile) formData.append('wind_file', windFile);
+
+    document.getElementById('loading').classList.remove('hidden');
+    try {
+      const response = await fetch('/api/calculate', {method: 'POST',body: formData});
+      let data;
+      try { data = await response.json(); } catch { throw new Error('后端没有返回合法 JSON，请查看 uvicorn 终端报错。'); }
+      if (!data.success) { alert('计算出错：' + data.error); return; }
+
+      document.getElementById('res-load').innerText = wan(data.total_load_kwh);
+      document.getElementById('res-gen').innerText = wan(data.total_generation_kwh);
+      document.getElementById('res-consumed').innerText = wan(data.total_consumed_kwh);
+      document.getElementById('res-fixed-load').innerText = wan(data.total_fixed_load_kwh);
+      document.getElementById('res-rate').innerText = data.annual_rate + '%';
+      document.getElementById('res-load-count').innerText = data.max_load_curve_count || '--';
+
+      const tbody = document.getElementById('indicatorTable');
+      tbody.innerHTML = '';
+      data.standard_indicators.rows.forEach(row => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td class="px-4 py-3 text-gray-700">${row.name}</td><td class="px-4 py-3 text-right font-bold text-gray-900">${row.value}</td>`;
+        tbody.appendChild(tr);
+      });
+
+      const diag = data.diagnostics || [];
+      const diagBox = document.getElementById('diagnosticsBox');
+      if (diag.length) {
+        diagBox.classList.remove('hidden');
+        diagBox.innerHTML = '<div class="font-bold mb-1">自动识别提示</div>' + diag.map(x => `<div>• ${x}</div>`).join('');
+      } else {
+        diagBox.classList.add('hidden');
+        diagBox.innerHTML = '';
+      }
+
+      const md = data.monthly_data;
+      const months = md.months.map(m => m + '月');
+      const toWanArray = arr => arr.map(v => +(Number(v || 0) / 10000).toFixed(2));
+
+      chartEnergy.setOption({
+        tooltip: { trigger: 'axis' },
+        legend: { bottom: 0 },
+        grid: { left: '4%', right: '4%', bottom: '16%', containLabel: true },
+        xAxis: { type: 'category', data: months },
+        yAxis: { type: 'value', name: '万kWh' },
+        series: [
+          { name: '企业用电量', type: 'bar', data: toWanArray(md.load_kw) },
+          { name: '上传负荷曲线电量', type: 'line', smooth: true, data: toWanArray(md.uploaded_load_kw || md.load_kw) },
+          { name: '固定负荷叠加电量', type: 'line', smooth: true, data: toWanArray(md.fixed_load_kw || []) },
+          { name: '新能源发电量', type: 'bar', data: toWanArray(md.renewable_kw) },
+          { name: '自发自用电量', type: 'bar', data: toWanArray(md.consumed_kw) },
+          { name: '上网电量', type: 'bar', data: toWanArray(md.grid_export_kw) },
+          { name: '下网电量', type: 'bar', data: toWanArray(md.grid_purchase_kw) },
+        ]
+      });
+
+      chartRate.setOption({
+        tooltip: { trigger: 'axis', valueFormatter: v => v + '%' },
+        legend: { bottom: 0 },
+        grid: { left: '4%', right: '4%', bottom: '16%', containLabel: true },
+        xAxis: { type: 'category', data: months },
+        yAxis: { type: 'value', axisLabel: { formatter: '{value}%' } },
+        series: [
+          { name: '自发自用/发电量', type: 'line', smooth: true, data: md.self_use_generation_rates },
+          { name: '自发自用/用电量', type: 'line', smooth: true, data: md.self_use_load_rates },
+          { name: '上网电量占比', type: 'line', smooth: true, data: md.export_rates },
+        ]
+      });
+
+      chartSource.setOption({
+        tooltip: { trigger: 'axis' },
+        legend: { bottom: 0 },
+        grid: { left: '4%', right: '4%', bottom: '16%', containLabel: true },
+        xAxis: { type: 'category', data: months },
+        yAxis: { type: 'value', name: '万kWh' },
+        series: [
+          { name: '光伏发电量', type: 'bar', stack: 'gen', data: toWanArray(md.pv_kw) },
+          { name: '风电发电量', type: 'bar', stack: 'gen', data: toWanArray(md.wind_kw) },
+        ]
+      });
+
+
+      chartLoadCount.setOption({
+        tooltip: { trigger: 'axis' },
+        legend: { bottom: 0 },
+        grid: { left: '4%', right: '4%', bottom: '16%', containLabel: true },
+        xAxis: { type: 'category', data: months },
+        yAxis: { type: 'value', name: '条' },
+        series: [
+          { name: '月平均参与曲线数', type: 'bar', data: md.load_curve_count_avg || [] },
+          { name: '月最大参与曲线数', type: 'line', smooth: true, data: md.load_curve_count_max || [] },
+        ]
+      });
+
+      chartSoc.setOption({
+        tooltip: { trigger: 'axis', valueFormatter: v => v + '%' },
+        grid: { left: '4%', right: '4%', bottom: '10%', containLabel: true },
+        xAxis: { type: 'category', data: data.soc_preview.hours },
+        yAxis: { type: 'value', axisLabel: { formatter: '{value}%' } },
+        series: [{ name: 'SOC', type: 'line', smooth: true, data: data.soc_preview.soc_percent }]
+      });
+    } catch (err) {
+      alert('请求失败，请确保后端服务 main.py 已经启动！\n' + err);
+    } finally {
+      document.getElementById('loading').classList.add('hidden');
+    }
+  });
+</script>
+</body>
+</html>
