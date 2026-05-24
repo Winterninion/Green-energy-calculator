@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>绿电直连风光储消纳测算平台</title>
+  <title>瑞之恒绿电直连风光荷储消纳测算平台</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 </head>
 <body class="bg-gray-50 min-h-screen p-6">
   <div class="max-w-7xl mx-auto">
-    <h1 class="text-3xl font-bold text-gray-900">☀️ 绿电直连风光储消纳测算平台</h1>
+    <h1 class="text-3xl font-bold text-gray-900">☀️ 瑞之恒绿电直连风光荷储消纳测算平台</h1>
     <p class="mt-2 text-gray-500">兼容任意多个负荷曲线、固定负荷叠加、15 分钟负荷曲线、1~8760 小时序号、样机/场站风电出力曲线，并输出扩展版申报指标。</p>
 
     <div class="grid grid-cols-1 lg:grid-cols-4 gap-6 mt-8">
@@ -178,7 +178,7 @@
 
     document.getElementById('loading').classList.remove('hidden');
     try {
-      const response = await fetch('/api/calculate', {method: 'POST',body: formData});
+      const response = await fetch('http://127.0.0.1:8000/api/calculate', { method: 'POST', body: formData });
       let data;
       try { data = await response.json(); } catch { throw new Error('后端没有返回合法 JSON，请查看 uvicorn 终端报错。'); }
       if (!data.success) { alert('计算出错：' + data.error); return; }

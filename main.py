@@ -1,24 +1,22 @@
+import base64
+import hashlib
+import hmac
 import io
 import math
+import os
+import secrets
+import time
 from typing import Any, Optional, List
 
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, UploadFile, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse, RedirectResponse
 
 from core_engine import PVConsumptionCalculator
 
-app = FastAPI(title="风光储绿电直连消纳测算 API")
-
-@app.get("/")
-async def home():
-    return FileResponse("index.html")
-
-@app.get("/index.html")
-async def index():
-    return FileResponse("index.html")
+app = FastAPI(title="瑞之恒绿电直连风光荷储消纳测算 API", docs_url=None, redoc_url=None, openapi_url=None)
 
 app.add_middleware(
     CORSMiddleware,
@@ -27,6 +25,152 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ========================= 登录保护配置 =========================
+# 不把明文密码写进代码；服务器通过 systemd 环境变量注入：
+# APP_PASSWORD_HASH=pbkdf2_sha256$260000$<salt_hex>$<hash_hex>
+# APP_SECRET_KEY=<随机长密钥>
+AUTH_COOKIE_NAME = "rzh_green_energy_auth"
+SESSION_MAX_AGE_SECONDS = int(os.environ.get("SESSION_MAX_AGE_SECONDS", str(12 * 3600)))
+APP_PASSWORD_HASH = os.environ.get("APP_PASSWORD_HASH", "").strip()
+APP_SECRET_KEY = os.environ.get("APP_SECRET_KEY", "").strip()
+
+LOGIN_PAGE_HTML = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>登录 - 瑞之恒绿电直连风光荷储消纳测算平台</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-slate-50 to-emerald-50 flex items-center justify-center p-6">
+  <div class="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-100 p-8">
+    <div class="text-center mb-6">
+      <div class="text-4xl mb-3">☀️</div>
+      <h1 class="text-2xl font-bold text-slate-900">瑞之恒绿电直连风光荷储消纳测算平台</h1>
+      <p class="mt-2 text-sm text-slate-500">请输入访问密码后继续</p>
+    </div>
+    <form method="post" action="/login" class="space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-slate-700 mb-1">访问密码</label>
+        <input name="password" type="password" required autofocus autocomplete="current-password"
+               class="w-full rounded-lg border border-slate-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+      </div>
+      <button type="submit" class="w-full rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 transition">
+        进入平台
+      </button>
+    </form>
+    <p class="mt-5 text-xs text-slate-400 text-center">密码校验在服务器端完成，明文密码不会写入网页。</p>
+  </div>
+</body>
+</html>
+"""
+
+
+def _password_configured() -> bool:
+    return bool(APP_PASSWORD_HASH and APP_SECRET_KEY)
+
+
+def _verify_password(password: str) -> bool:
+    """校验 PBKDF2-SHA256 密码哈希；明文密码不存放在代码或前端。"""
+    if not _password_configured():
+        return False
+    try:
+        scheme, iterations_s, salt_hex, hash_hex = APP_PASSWORD_HASH.split("$", 3)
+        if scheme != "pbkdf2_sha256":
+            return False
+        iterations = int(iterations_s)
+        salt = bytes.fromhex(salt_hex)
+        expected = bytes.fromhex(hash_hex)
+        actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+        return hmac.compare_digest(actual, expected)
+    except Exception:
+        return False
+
+
+def _sign_payload(payload: str) -> str:
+    return hmac.new(APP_SECRET_KEY.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _make_auth_token() -> str:
+    expires_at = int(time.time()) + SESSION_MAX_AGE_SECONDS
+    nonce = secrets.token_urlsafe(18)
+    payload = f"{expires_at}:{nonce}"
+    payload_b64 = base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii")
+    return f"{payload_b64}.{_sign_payload(payload_b64)}"
+
+
+def _is_authenticated(request: Request) -> bool:
+    if not _password_configured():
+        return False
+    token = request.cookies.get(AUTH_COOKIE_NAME, "")
+    if "." not in token:
+        return False
+    payload_b64, sig = token.rsplit(".", 1)
+    if not hmac.compare_digest(_sign_payload(payload_b64), sig):
+        return False
+    try:
+        payload = base64.urlsafe_b64decode(payload_b64.encode("ascii")).decode("utf-8")
+        expires_at_s, _nonce = payload.split(":", 1)
+        return int(expires_at_s) >= int(time.time())
+    except Exception:
+        return False
+
+
+@app.middleware("http")
+async def require_login_middleware(request: Request, call_next):
+    path = request.url.path
+    public_paths = {"/login", "/logout", "/favicon.ico"}
+    if path not in public_paths and not _is_authenticated(request):
+        if path.startswith("/api/"):
+            return JSONResponse(content={"success": False, "error": "请先登录。"}, status_code=401)
+        return RedirectResponse(url="/login", status_code=303)
+    return await call_next(request)
+
+
+@app.get("/login")
+async def login_page():
+    if not _password_configured():
+        return HTMLResponse(
+            "<h1>访问密码未配置</h1><p>请在服务器 systemd 服务中设置 APP_PASSWORD_HASH 和 APP_SECRET_KEY。</p>",
+            status_code=503,
+        )
+    return HTMLResponse(LOGIN_PAGE_HTML)
+
+
+@app.post("/login")
+async def login_submit(password: str = Form(...)):
+    if not _verify_password(password):
+        return HTMLResponse(LOGIN_PAGE_HTML.replace("请输入访问密码后继续", "密码错误，请重试"), status_code=401)
+    response = RedirectResponse(url="/", status_code=303)
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=_make_auth_token(),
+        max_age=SESSION_MAX_AGE_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=False,  # 如果以后启用 HTTPS，可改为 True
+    )
+    return response
+
+
+@app.get("/logout")
+async def logout():
+    response = RedirectResponse(url="/login", status_code=303)
+    response.delete_cookie(AUTH_COOKIE_NAME)
+    return response
+
+
+@app.get("/")
+async def home():
+    return FileResponse("index.html")
+
+
+@app.get("/index.html")
+async def index_html():
+    return FileResponse("index.html")
+
 
 
 def to_json_safe(obj: Any) -> Any:
